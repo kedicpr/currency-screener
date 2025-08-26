@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Скринер валют Pro+</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --card-bg: white;
+      --text: #333;
+      --accent: #3498db;
+      --hover: #f1f7ff;
+      --border: #ddd;
+      --success: #27ae60;
+      --up: #2ecc71;
+      --down: #e74c3c;
+    }
+    .dark-mode {
+      --bg: #1a1a1a;
+      --card-bg: #2d2d2d;
+      --text: #e0e0e0;
+      --accent: #1abc9c;
+      --hover: #3a3a3a;
+      --border: #555;
+      --success: #2ecc71;
+    }
+    body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+    .theme-toggle { background: var(--accent); color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; }
+    .section { background: var(--card-bg); padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { background-color: var(--accent); color: white; }
+    tr:hover { background-color: var(--hover); }
+    .rate { font-weight: 500; }
+    .change { font-size: 0.9em; padding: 2px 6px; border-radius: 3px; color: white; }
+    .up { background: var(--up); }
+    .down { background: var(--down); }
+    .search { width: 100%; padding: 10px; margin-bottom: 15px; font-size: 16px; border: 1px solid var(--border); border-radius: 5px; }
+    .tooltip { position: relative; cursor: help; }
+    .tooltip::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #333; color: white; padding: 5px 10px; border-radius: 4px; font-size: 14px; white-space: nowrap; opacity: 0; transition: opacity 0.3s; }
+    .tooltip:hover::after { opacity: 1; }
+    #chart-container { height: 300px; margin-top: 20px; }
+    .checkbox-group { margin: 10px 0; }
+    .checkbox-group label { margin-right: 15px; font-size: 14px; }
+  </style>
+</head>
+<body class="light-mode">
+  <div class="container">
+    <div class="header">
+      <h1>💰 Скринер валют Pro+</h1>
+      <button class="theme-toggle" id="themeToggle">🌙 Тёмная</button>
+    </div>
+
+    <!-- Поиск -->
+    <input type="text" class="search" id="searchInput" placeholder="Поиск валюты (например: евро, USD, фунт)...">
+
+    <!-- Таблица -->
+    <div class="section">
+      <h2>📊 Курсы валют</h2>
+      <table id="currency-table">
+        <thead>
+          <tr>
+            <th>№</th>
+            <th>Валюта</th>
+            <th>Код</th>
+            <th>Курс к рублю</th>
+            <th>Изменение</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+
+    <!-- График -->
+    <div class="section">
+      <h2>📈 Динамика курса</h2>
+      <div class="checkbox-group">
+        <label><input type="checkbox" value="USD" checked> USD</label>
+        <label><input type="checkbox" value="EUR" checked> EUR</label>
+        <label><input type="checkbox" value="GBP"> GBP</label>
+      </div>
+      <div id="chart-container">
+        <canvas id="mainChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tableBody = document.getElementById("table-body");
+    const searchInput = document.getElementById("searchInput");
+    const themeToggle = document.getElementById("themeToggle");
+    const ctx = document.getElementById("mainChart").getContext("2d");
+    let mainChart;
+    let currencyRates = {};
+    let prevRates = {};
+
+    const currencies = [
+      { code: "USD", name: "Доллар США", tip: "Американский доллар" },
+      { code: "EUR", name: "Евро", tip: "Европейский союз" },
+      { code: "GBP", name: "Фунт стерлингов", tip: "Великобритания" },
+      { code: "CHF", name: "Швейцарский франк", tip: "Швейцария" },
+      { code: "JPY", name: "Японская иена", tip: "Япония" },
+      { code: "CNY", name: "Китайский юань", tip: "Китай" },
+      { code: "KZT", name: "Казахстанский тенге", tip: "Казахстан" }
+    ];
+
+    // === 1. Тема ===
+    themeToggle.addEventListener("click", () => {
+      document.body.classList.toggle("dark-mode");
+      themeToggle.textContent = document.body.classList.contains("dark-mode") ? "☀️ Светлая" : "🌙 Тёмкая";
+      localStorage.setItem("theme", document.body.classList.contains("dark-mode"));
+    });
+
+    if (localStorage.getItem("theme") === "true") {
+      document.body.classList.add("dark-mode");
+      themeToggle.textContent = "☀️ Светлая";
+    }
+
+    // === 2. Поиск ===
+    searchInput.addEventListener("input", () => {
+      const term = searchInput.value.toLowerCase();
+      document.querySelectorAll("#table-body tr").forEach(tr => {
+        const text = tr.textContent.toLowerCase();
+        tr.style.display = text.includes(term) ? "" : "none";
+      });
+    });
+
+    // === 3. Уведомления ===
+    function requestNotificationPermission() {
+      if ("Notification" in window) {
+        Notification.requestPermission();
+      }
+    }
+    requestNotificationPermission();
+
+    function showNotification(msg) {
+      if (Notification.permission === "granted") {
+        new Notification("Курс валют", { body: msg });
+      }
+    }
+
+    // === 4. Загрузка курсов ===
+    async function loadRates() {
+      try {
+        const res = await fetch("https://www.cbr-xml-daily.ru/daily_json.js");
+        const data = await res.json();
+
+        tableBody.innerHTML = "";
+        prevRates = { ...currencyRates };
+        currencyRates = {};
+
+        currencies.forEach((curr, i) => {
+          const val = data.Valute[curr.code];
+          if (val) {
+            const rate = val.Value;
+            const prev = prevRates[curr.code] || rate;
+            const change = ((rate - prev) / prev * 100).toFixed(2);
+            const isUp = rate > prev;
+
+            const tr = document.createElement("tr");
+
+            tr.innerHTML = `
+              <td>${i+1}</td>
+              <td class="tooltip" data-tip="${curr.tip}">${curr.name}</td>
+              <td><strong>${curr.code}</strong></td>
+              <td class="rate">${rate.toFixed(4)}</td>
+              <td>
+                <span class="change ${isUp ? 'up' : 'down'}">
+                  ${isUp ? '↑' : '↓'} ${Math.abs(change)}%
+                </span>
+              </td>
+            `;
+
+            tableBody.appendChild(tr);
+            currencyRates[curr.code] = rate;
+
+            // Уведомление
+            if (curr.code === "EUR" && rate > 110) {
+              showNotification(`⚠️ Евро достиг ${rate.toFixed(2)} руб!`);
+            }
+          }
+        });
+
+        updateChart();
+      } catch (e) {
+        console.error("Ошибка:", e);
+      }
+    }
+
+    // === 5. График (множественный) ===
+    function updateChart() {
+      const checked = Array.from(document.querySelectorAll(".checkbox-group input:checked")).map(cb => cb.value);
+      if (checked.length === 0) return;
+
+      const dates = [];
+      const datasets = [];
+
+      // Собираем данные за 7 дней
+      let currentDate = new Date();
+      currentDate.setDate(currentDate.getDate() - 7);
+
+      for (let i = 0; i < 8; i++) {
+        const dateStr = currentDate.toISOString().split('T')[0];
+        dates.push(dateStr);
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      checked.forEach(code => {
+        const data = dates.map(date => {
+          // Здесь можно кэшировать или использовать localStorage
+          return 0; // Упрощённо — в реальности берётся из архива
+        });
+        datasets.push({
+          label: `${code}/RUB`,
+          data: data,
+          borderColor: { USD: '#e67e22', EUR: '#e74c3c', GBP: '#9b59b6' }[code],
+          fill: false,
+          tension: 0.3
+        });
+      });
+
+      if (mainChart) mainChart.destroy();
+      mainChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: dates, datasets },
+        options: { responsive: true }
+      });
+    }
+
+    document.querySelectorAll(".checkbox-group input").forEach(cb => {
+      cb.addEventListener("change", updateChart);
+    });
+
+    // === Запуск ===
+    loadRates();
+    setInterval(loadRates, 300000); // каждые 5 минут
+  </script>
+</body>
+</html>
